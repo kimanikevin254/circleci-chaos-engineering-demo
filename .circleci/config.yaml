@@ -1,0 +1,83 @@
+version: 2.1
+
+jobs:
+    chaos-test:
+        machine:
+            image: ubuntu-2204:current
+        steps:
+            - checkout
+
+            # Install required tools
+            - run:
+                  name: Install Kind
+                  command: |
+                      curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+                      chmod +x ./kind
+                      sudo mv ./kind /usr/local/bin/kind
+
+            - run:
+                  name: Install kubectl
+                  command: |
+                      curl -LO "https://dl.k8s.io/release/stable.txt"
+                      curl -LO "https://dl.k8s.io/release/$(cat stable.txt)/bin/linux/amd64/kubectl"
+                      chmod +x kubectl
+                      sudo mv kubectl /usr/local/bin/kubectl
+
+            - run:
+                  name: Install Python and Chaos Toolkit
+                  command: |
+                      sudo apt-get update
+                      sudo apt-get install -y python3 python3-pip
+                      pip3 install -r app/requirements.txt
+                      pip3 install chaostoolkit chaostoolkit-kubernetes
+
+            - run:
+                  name: Create Kind cluster with port mapping
+                  command: |
+                      # Create Kind cluster with port mapping for NodePort service
+                      cat \<<EOF | kind create cluster --name chaos-demo --config=-
+                      kind: Cluster
+                      apiVersion: kind.x-k8s.io/v1alpha4
+                      nodes:
+                        - role: control-plane
+                          extraPortMappings:
+                            - containerPort: 30080
+                              hostPort: 30080
+                              protocol: TCP
+                      EOF
+
+                      kubectl cluster-info # Check if the cluster is running
+
+            - run:
+                  name: Build and load Flask application
+                  command: |
+                      docker build -t flask-chaos-demo:latest .
+                      kind load docker-image flask-chaos-demo:latest --name chaos-demo
+
+            - run:
+                  name: Deploy application to Kubernetes
+                  command: |
+                      kubectl apply -f k8s-configs
+                      kubectl rollout status deployment/flaskapp --timeout=90s
+                      kubectl get pods -l app=flaskapp
+                      kubectl get services
+
+            - run:
+                  name: Run pod termination experiment
+                  command: |
+                      # Verify service is reachable
+                      curl -s http://localhost:30080/ || echo "Service not reachable"
+                      sleep 15
+
+                      chaos run chaos/pod-termination-experiment.json
+
+            - run:
+                  name: Cleanup resources
+                  command: |
+                      kind delete cluster --name chaos-demo
+                  when: always
+
+workflows:
+    chaos-testing:
+        jobs:
+            - chaos-test

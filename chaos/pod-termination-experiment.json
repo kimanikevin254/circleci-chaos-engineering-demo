@@ -1,0 +1,67 @@
+{
+    "version": "1.0.0",
+    "title": "Pod Termination Experiment",
+    "description": "Verify that Kubernetes automatically recovers when a pod is killed",
+    "tags": ["kubernetes", "pod", "termination", "recovery"],
+    "steady-state-hypothesis": {
+        "title": "Application is healthy",
+        "probes": [
+            {
+                "name": "all-pods-should-be-running",
+                "type": "probe",
+                "tolerance": 2,
+                "provider": {
+                    "type": "python",
+                    "module": "chaosk8s.pod.probes",
+                    "func": "count_pods",
+                    "arguments": {
+                        "label_selector": "app=flaskapp",
+                        "phase": "Running"
+                    }
+                }
+            },
+            {
+                "name": "application-must-respond-ok",
+                "type": "probe",
+                "tolerance": 200,
+                "provider": {
+                    "type": "http",
+                    "url": "http://192.168.49.2:30080/",
+                    "timeout": 5
+                }
+            }
+        ]
+    },
+    "method": [
+        {
+            "type": "action",
+            "name": "terminate-pod",
+            "provider": {
+                "type": "python",
+                "module": "chaosk8s.pod.actions",
+                "func": "terminate_pods",
+                "arguments": {
+                    "label_selector": "app=flaskapp",
+                    "rand": true
+                }
+            },
+            "pauses": {
+                "after": 3
+            }
+        },
+        {
+            "type": "probe",
+            "name": "verify-service-still-responsive-with-pod-down",
+            "tolerance": 200,
+            "provider": {
+                "type": "http",
+                "url": "http://192.168.49.2:30080/",
+                "timeout": 5
+            },
+            "pauses": {
+                "after": 45
+            }
+        }
+    ],
+    "rollbacks": []
+}
