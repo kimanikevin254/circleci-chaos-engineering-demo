@@ -7,7 +7,6 @@ jobs:
         steps:
             - checkout
 
-            # Install required tools
             - run:
                   name: Install Kind
                   command: |
